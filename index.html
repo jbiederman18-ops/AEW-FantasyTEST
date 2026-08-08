@@ -721,7 +721,17 @@
       </div>
     </div>
 
-
+    <!-- New Season -->
+    <div class="settings-block" style="border-color:rgba(29,211,176,0.2);">
+      <h3 style="color:var(--teal);">Start New Season</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:14px;">Create a new Google Sheet, deploy the same Apps Script to it, then connect it here. Clears current local data and starts fresh — make sure you've added the current season to the Archive first!</p>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
+        <input type="url" id="newSeasonUrl" placeholder="New season Apps Script URL" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:'Barlow',sans-serif;font-size:13px;">
+        <input type="text" id="newSeasonNameInput" placeholder="Season name (e.g. Road Chip 2)" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:'Barlow',sans-serif;font-size:13px;">
+      </div>
+      <button class="btn-primary" style="background:var(--teal);color:#000;" onclick="startNewSeason()">🆕 Start New Season</button>
+      <span id="newSeasonMsg" style="margin-left:10px;font-size:12px;font-family:'Barlow Condensed',sans-serif;display:none;"></span>
+    </div>
 
   </div>
 </main>
@@ -730,6 +740,8 @@
 // ─────────────────────────────────────────────
 // HARDCODED SCRIPT URL — no setup needed
 // ─────────────────────────────────────────────
+// Script URL — stored in localStorage so it can be changed without touching code
+// Falls back to the hardcoded URL if nothing is stored
 const HARDCODED_URL = 'https://script.google.com/macros/s/AKfycbyr0zdJF7zxbELK46TxWXVOCddLsM2upRf5IR_juNSG3NYQR9T_ABgJ8PqSHbqy4o0A9Q/exec';
 
 const TEAMS = ['maria','ryan','josh','erik'];
@@ -802,7 +814,7 @@ function output(text) {
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
-let scriptUrl = HARDCODED_URL;
+let scriptUrl = localStorage.getItem('aew_script_url') || HARDCODED_URL;
 let state = {
   rosters: {
     erik:  { a:'Jon Moxley', b:'Swerve Strickland', c:'Willow Nightingale', d:'Cash Wheeler', e:'Mistico', f:'Orange Cassidy', g:'Jungle Boy', h:'Kris Statlander', i:'David Finlay', j:'Ricochet', k:'Nick Buck', l:'Alex Windsor' },
@@ -2287,6 +2299,55 @@ async function removeArchiveSeason(idx) {
 }
 
 
+async function startNewSeason() {
+  const url = document.getElementById('newSeasonUrl').value.trim();
+  const name = document.getElementById('newSeasonNameInput').value.trim();
+  const msg = document.getElementById('newSeasonMsg');
+  if (!url || !name) {
+    msg.textContent = 'Fill in both fields'; msg.style.color = 'var(--red)'; msg.style.display = 'inline'; 
+    setTimeout(() => msg.style.display = 'none', 3000); return;
+  }
+  if (!confirm(`Start new season "${name}"? This will clear all current season data locally and connect to the new sheet.`)) return;
+
+  msg.textContent = 'Testing connection…'; msg.style.color = 'var(--gold)'; msg.style.display = 'inline';
+
+  try {
+    // Test the new URL works
+    const testR = await fetch(`${url}?action=getAll`);
+    const testJ = await testR.json();
+    if (!testJ.ok) throw new Error('Sheet not responding');
+
+    // Save new URL
+    scriptUrl = url;
+    localStorage.setItem('aew_script_url', url);
+    document.getElementById('scriptUrlInput').value = url;
+
+    // Clear dirty keys so fresh data loads
+    dirtyKeys.clear();
+
+    // Reset local state to defaults
+    state.scores = {};
+    state.schedule = [];
+    state.seasonName = name;
+    state.swaps = { tokens: { maria:0, ryan:0, josh:0, erik:0 }, history: [] };
+    state.draft = null;
+    draftState = { active:false, order:['maria','ryan','josh','erik'], rounds:12, picks:[] };
+    window._rostersInSheet = false;
+
+    // Load from new sheet
+    await loadFromSheet();
+    setSyncStatus('Live', 'ok');
+
+    msg.textContent = `✓ Season "${name}" started!`; msg.style.color = 'var(--teal)';
+    settingsLoaded = false;
+    renderAll();
+    setTimeout(() => msg.style.display = 'none', 4000);
+  } catch(e) {
+    msg.textContent = '✗ Connection failed — check URL'; msg.style.color = 'var(--red)';
+    setTimeout(() => msg.style.display = 'none', 3000);
+  }
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
@@ -2356,7 +2417,7 @@ async function saveScriptUrl() {
     return;
   }
   scriptUrl = val;
-  localStorage.setItem('aew_script_url_override', scriptUrl);
+  localStorage.setItem('aew_script_url', scriptUrl);
   document.getElementById('connectionMsg').innerHTML = '<span style="color:var(--gold);">Testing…</span>';
   setSyncStatus('Connecting…', 'loading');
   try {
