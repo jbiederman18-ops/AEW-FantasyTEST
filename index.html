@@ -865,7 +865,7 @@ let draftState = {
 let archiveSeasons = JSON.parse(localStorage.getItem('aew_archive_seasons') || '[]');
 let archiveData = {}; // { [seasonName]: { rosters, scores, schedule, seasonName } }
 let activeArchiveVault = null;
-let activeArchiveSub = 'trophy'; = { tokens: {maria:0,...}, history: [{team,slot,oldWrestler,newWrestler,date,show}] }
+let activeArchiveSub = 'trophy';
 // Keys written locally that should not be overwritten by a sync until page reload
 const dirtyKeys = new Set();
 
@@ -883,19 +883,26 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initFromSheet() {
+  // Render immediately with defaults so app is never blocked
+  renderAll();
+
+  if (!scriptUrl) {
+    setSyncStatus('Not connected', 'err');
+    return;
+  }
+
   setSyncStatus('Loading…', 'loading');
   try {
     await loadFromSheet();
-    // If no roster keys exist in the sheet yet, push the hardcoded defaults up now
-    if (scriptUrl && !window._rostersInSheet) {
+    if (!window._rostersInSheet) {
       setSyncStatus('Saving rosters…', 'loading');
       await saveRosters();
     }
     setSyncStatus('Live', 'ok');
+    renderAll(); // re-render with live data
   } catch(e) {
     setSyncStatus('Offline', 'err');
   }
-  renderAll();
 }
 
 function renderAll() {
@@ -2326,10 +2333,8 @@ async function aiScoreShow() {
   if (!show) { btn.disabled=false; btn.innerHTML='<span class="ai-icon">✨</span> Score for Me'; return; }
 
   const roster = state.rosters[currentTeam];
-  const wrestlerList = LETTERS.map(l => `${l.toUpperCase()}: ${roster[l]||'(empty)'}`).join('
-');
-  const accList = ACCOMPLISHMENTS.map(a => `${a.key} (+${a.pts}pts): ${a.label||a.key}`).join('
-');
+  const wrestlerList = LETTERS.map(l => `${l.toUpperCase()}: ${roster[l]||'(empty)'}`).join('\n');
+  const accList = ACCOMPLISHMENTS.map(a => `${a.key} (+${a.pts}pts): ${a.label||a.key}`).join('\n');
   const showDate = fmtDate(show.date);
   const showName = showLabel(show.type);
 
