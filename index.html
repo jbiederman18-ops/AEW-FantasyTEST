@@ -827,31 +827,19 @@ function doGet(e) {
       sheet.appendRow([key,value]);
       return output(JSON.stringify({ok:true}));
     }
-    return output(JSON.stringify({ok:false,error:'Unknown action'}));
-  } catch(err) { return output(JSON.stringify({ok:false,error:err.toString()})); }
-}
-
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents);
-    if (body.action === 'ai') {
-      if (!ANTHROPIC_API_KEY) return output(JSON.stringify({ok:false,error:'No API key configured'}));
-      const payload = JSON.stringify({
-        model: body.model || 'claude-sonnet-4-6',
-        max_tokens: body.max_tokens || 1000,
-        tools: body.tools || [],
-        system: body.system || '',
-        messages: body.messages || []
-      });
+    if (action === 'ai') {
+      if (!ANTHROPIC_API_KEY) return output(JSON.stringify({ok:false,error:'No API key configured. Add it to the Apps Script.'}));
+      const payload = e.parameter.payload;
+      if (!payload) return output(JSON.stringify({ok:false,error:'No payload'}));
+      const body = JSON.parse(decodeURIComponent(payload));
       const response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
         method: 'post',
         contentType: 'application/json',
         headers: {
           'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'interleaved-thinking-2025-05-14'
+          'anthropic-version': '2023-06-01'
         },
-        payload: payload,
+        payload: JSON.stringify(body),
         muteHttpExceptions: true
       });
       const result = JSON.parse(response.getContentText());
@@ -860,6 +848,8 @@ function doPost(e) {
     return output(JSON.stringify({ok:false,error:'Unknown action'}));
   } catch(err) { return output(JSON.stringify({ok:false,error:err.toString()})); }
 }
+
+
 
 function output(text) {
   return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
@@ -2373,10 +2363,7 @@ async function aiScoreShow() {
   const showName = showLabel(show.type);
 
   try {
-    const response = await fetch(scriptUrl + '?action=ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const aiPayload = encodeURIComponent(JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
@@ -2393,27 +2380,10 @@ IMPORTANT RULES:
 - Return ONLY valid JSON, no preamble or explanation`,
         messages: [{
           role: 'user',
-          content: `Search for the results of AEW ${showName} on ${showDate} from https://www.allelitewrestling.com/aew-results
-
-Here are the wrestlers on Team ${TEAM_LABELS[currentTeam]} that I need to score:
-${wrestlerList}
-
-For each wrestler, determine how many times they earned each accomplishment based on the show results.
-
-Return a JSON object in exactly this format:
-{
-  "suggestions": {
-    "a": { "win": 1, "promoLive": 1 },
-    "b": {},
-    "c": { "loss": 1, "runin": 1 },
-    ...etc for all letters a through l
-  },
-  "source": "brief description of where results were found",
-  "notes": "any important caveats or wrestlers not found in results"
-}`
+          content: `Search for the results of AEW ${showName} on ${showDate} from https://www.allelitewrestling.com/aew-results. Here are the wrestlers on Team ${TEAM_LABELS[currentTeam]}: ${wrestlerList}. For each wrestler determine how many times they earned each accomplishment. Return ONLY a JSON object: {"suggestions":{"a":{"win":1},"b":{},...},"source":"where found","notes":"caveats"}`
         }]
-      })
-    });
+      }));
+    const response = await fetch(`${scriptUrl}?action=ai&payload=${aiPayload}`);
 
     const data = await response.json();
     if (!data.ok) throw new Error(data.error || 'AI request failed');
