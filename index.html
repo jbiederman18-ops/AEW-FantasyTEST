@@ -495,31 +495,7 @@
   .archive-del-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
   .archive-del-btn:active { color: var(--red); }
 
-  /* ── AI SCORER ── */
-  .ai-score-btn {
-    background: linear-gradient(135deg, #1a1420, #0f0f1a);
-    border: 1px solid rgba(138,43,226,0.4); border-radius: 10px;
-    padding: 12px 18px; display: flex; align-items: center; gap: 10px;
-    cursor: pointer; width: 100%; margin-bottom: 16px;
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
-    letter-spacing: 1px; text-transform: uppercase; color: #b06aff;
-    transition: all 0.2s; -webkit-tap-highlight-color: transparent;
-  }
-  .ai-score-btn:active { transform: scale(0.98); }
-  .ai-score-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-  .ai-score-btn .ai-icon { font-size: 20px; }
-  .ai-suggestion-banner {
-    background: linear-gradient(135deg, rgba(138,43,226,0.08), rgba(75,0,130,0.05));
-    border: 1px solid rgba(138,43,226,0.25); border-radius: 10px;
-    padding: 14px; margin-bottom: 16px; display: none;
-  }
-  .ai-suggestion-banner.visible { display: block; }
-  .ai-suggestion-title {
-    font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
-    letter-spacing: 2px; text-transform: uppercase; color: #b06aff; margin-bottom: 6px;
-  }
-  .ai-suggestion-note { font-size: 12px; color: var(--muted); line-height: 1.5; }
-  .ai-suggestion-note b { color: var(--text); }
+
 
   /* ── UTILS ── */
   .loading-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
@@ -643,18 +619,6 @@
         <label>Show</label>
         <select id="showSelect" onchange="loadShowScores()"></select>
         <span id="showTypePill"></span>
-      </div>
-      <button class="ai-score-btn" id="aiScoreBtn" onclick="aiScoreShow()">
-        <span class="ai-icon">✨</span>
-        Score for Me — AI suggests points based on show results
-      </button>
-      <div class="ai-suggestion-banner" id="aiSuggestionBanner">
-        <div class="ai-suggestion-title">✨ AI Suggestions Applied</div>
-        <div class="ai-suggestion-note">
-          <b id="aiSuggestionCount">0</b> accomplishments pre-filled from <b id="aiSuggestionSource"></b>.
-          Review all counters carefully before saving — AI can make mistakes!
-          <span id="aiSuggestionNotes" style="display:block;margin-top:4px;color:var(--muted);"></span>
-        </div>
       </div>
       <div class="scoring-list" id="scoringList"></div>
       <div class="gap-sm"></div>
@@ -795,9 +759,6 @@ const ACCOMPLISHMENTS = [
 ];
 
 const APPS_SCRIPT_CODE = `const SHEET_NAME = 'AEWData';
-// ⚠️ Add your Anthropic API key here to enable AI scoring
-const ANTHROPIC_API_KEY = ''; // e.g. 'sk-ant-...'
-
 function doGet(e) {
   const action = e.parameter.action;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -827,24 +788,7 @@ function doGet(e) {
       sheet.appendRow([key,value]);
       return output(JSON.stringify({ok:true}));
     }
-    if (action === 'ai') {
-      if (!ANTHROPIC_API_KEY) return output(JSON.stringify({ok:false,error:'No API key configured. Add it to the Apps Script.'}));
-      const payload = e.parameter.payload;
-      if (!payload) return output(JSON.stringify({ok:false,error:'No payload'}));
-      const body = JSON.parse(decodeURIComponent(payload));
-      const response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-        method: 'post',
-        contentType: 'application/json',
-        headers: {
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
-        },
-        payload: JSON.stringify(body),
-        muteHttpExceptions: true
-      });
-      const result = JSON.parse(response.getContentText());
-      return output(JSON.stringify({ok:true,content:result.content}));
-    }
+
     return output(JSON.stringify({ok:false,error:'Unknown action'}));
   } catch(err) { return output(JSON.stringify({ok:false,error:err.toString()})); }
 }
@@ -2342,108 +2286,6 @@ async function removeArchiveSeason(idx) {
   renderArchive();
 }
 
-// ─────────────────────────────────────────────
-// AI SCORER
-// ─────────────────────────────────────────────
-async function aiScoreShow() {
-  if (!currentTeam || !currentShowId) return;
-  const btn = document.getElementById('aiScoreBtn');
-  const banner = document.getElementById('aiSuggestionBanner');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="ai-icon">✨</span> Fetching results…';
-  banner.classList.remove('visible');
-
-  const show = state.schedule.find(s => `${s.date}_${s.type}` === currentShowId);
-  if (!show) { btn.disabled=false; btn.innerHTML='<span class="ai-icon">✨</span> Score for Me'; return; }
-
-  const roster = state.rosters[currentTeam];
-  const wrestlerList = LETTERS.map(l => `${l.toUpperCase()}: ${roster[l]||'(empty)'}`).join('\n');
-  const accList = ACCOMPLISHMENTS.map(a => `${a.key} (+${a.pts}pts): ${a.label||a.key}`).join('\n');
-  const showDate = fmtDate(show.date);
-  const showName = showLabel(show.type);
-
-  try {
-    const aiPayload = encodeURIComponent(JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: `You are a scoring assistant for an AEW fantasy wrestling league. 
-Your job is to search for the results of an AEW show and determine which accomplishments were earned by wrestlers on a specific team.
-
-The accomplishments and their point values are:
-${accList}
-
-IMPORTANT RULES:
-- Only award points for things that clearly happened based on match results
-- A wrestler can earn the same accomplishment multiple times (e.g. two run-ins = count 2)
-- Be conservative — only mark things you're confident happened
-- Return ONLY valid JSON, no preamble or explanation`,
-        messages: [{
-          role: 'user',
-          content: `Search for the results of AEW ${showName} on ${showDate} from https://www.allelitewrestling.com/aew-results. Here are the wrestlers on Team ${TEAM_LABELS[currentTeam]}: ${wrestlerList}. For each wrestler determine how many times they earned each accomplishment. Return ONLY a JSON object: {"suggestions":{"a":{"win":1},"b":{},...},"source":"where found","notes":"caveats"}`
-        }]
-      }));
-    const response = await fetch(`${scriptUrl}?action=ai&payload=${aiPayload}`);
-
-    const data = await response.json();
-    if (!data.ok) throw new Error(data.error || 'AI request failed');
-    const textBlock = data.content?.find(b => b.type === 'text');
-    if (!textBlock) throw new Error('No text response');
-
-    // Parse JSON from response
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found');
-    const result = JSON.parse(jsonMatch[0]);
-
-    if (!result.suggestions) throw new Error('No suggestions in response');
-
-    // Apply suggestions to the stepper UI
-    let appliedCount = 0;
-    for (const letter of LETTERS) {
-      const letterSuggestions = result.suggestions[letter] || {};
-      for (const acc of ACCOMPLISHMENTS) {
-        const count = letterSuggestions[acc.key] || 0;
-        if (count === 0) continue;
-        const countEl = document.getElementById(`cnt_${letter}_${acc.key}`);
-        if (!countEl) continue;
-        // Set the count
-        countEl.textContent = count;
-        countEl.className = `stepper-count ${count > 0 ? 'nonzero' : ''}`;
-        // Update row highlighting
-        const row = document.getElementById(`accrow_${letter}_${acc.key}`);
-        if (row) {
-          row.classList.toggle('has-count', count > 0);
-          const lbl = row.querySelector('.acc-label');
-          const badge = row.querySelector('.acc-badge');
-          if (lbl) lbl.style.color = count > 0 ? 'var(--gold)' : '';
-          if (badge) { badge.style.color = count > 0 ? 'var(--gold)' : ''; badge.style.borderColor = count > 0 ? 'rgba(240,180,41,0.3)' : ''; }
-        }
-        // Update live counts
-        if (!window._liveCounts) window._liveCounts = {};
-        if (!window._liveCounts[letter]) window._liveCounts[letter] = {};
-        window._liveCounts[letter][acc.key] = count;
-        appliedCount++;
-      }
-    }
-    recalcTotal();
-
-    // Show banner
-    banner.classList.add('visible');
-    document.getElementById('aiSuggestionSource').textContent = result.source || 'AEW results page';
-    document.getElementById('aiSuggestionNotes').textContent = result.notes || '';
-    document.getElementById('aiSuggestionCount').textContent = appliedCount;
-
-    btn.innerHTML = '<span class="ai-icon">✨</span> Re-score';
-  } catch(e) {
-    console.error('AI scorer error:', e);
-    banner.classList.add('visible');
-    document.getElementById('aiSuggestionSource').textContent = 'Error';
-    document.getElementById('aiSuggestionNotes').textContent = `Could not fetch results: ${e.message}. Please score manually.`;
-    document.getElementById('aiSuggestionCount').textContent = '0';
-    btn.innerHTML = '<span class="ai-icon">✨</span> Score for Me';
-  }
-  btn.disabled = false;
-}
 
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
